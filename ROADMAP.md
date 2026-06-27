@@ -30,3 +30,14 @@ This roadmap outlines the planned development phases for the ServCloud managed d
 - [ ] **WASM Isolation**: Direct execution of compiled WASM targets in-process for sandbox isolation.
 - [ ] **Docker Engine runner**: Spin up individual services in isolated Docker containers instead of native processes.
 - [ ] **Shared OIDC Authentication**: Enforce bearer token validation via shared `SERV_JWT_SECRET`.
+
+
+## Phase 3: Production-Ready PaaS (Next Level)
+- [ ] **Rolling Deployments**: Zero-downtime deploys with health-check gates. Automatic rollback on failure.
+- [ ] **Resource Quotas & Limits**: Per-deployment CPU/memory caps with OOM protection.
+- [ ] **Environment Variables Management**: Encrypted env var store per deployment. Secret injection at runtime.
+- [ ] **Build Packs**: Auto-detect project type (Go, Node, Python, Serv) and build without user-provided Dockerfile.
+- [ ] **Deployment Previews**: Branch-based preview deployments with unique URLs (like Vercel previews).
+- [ ] **Horizontal Auto-scaling**: Scale instances up/down based on request rate from ServGate metrics.
+- [ ] **Integrated CI Pipeline**: Run `serv test` before deploy. Reject deploys that fail tests.
+- [ ] **Multi-region Deployment**: Deploy to multiple regions with ServMesh-based global load balancing.
