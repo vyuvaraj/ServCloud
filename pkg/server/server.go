@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"servcloud/pkg/orchestrator"
+
+	"github.com/vyuvaraj/ServShared"
 )
 
 type Server struct {
@@ -87,7 +89,7 @@ func (s *Server) Handler() http.Handler {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 	})
 
-	return mux
+	return ServShared.AuthMiddleware(mux)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
