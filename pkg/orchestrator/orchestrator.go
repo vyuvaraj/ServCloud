@@ -99,42 +99,26 @@ func FindFreePort() (int, error) {
 
 func (o *Orchestrator) Deploy(name string, srvCode string) (*ServiceProcess, error) {
 	o.mu.Lock()
-	defer o.mu.Unlock()
+	oldProc, hasOld := o.services[name]
+	o.mu.Unlock()
 
-	// If service exists and is running, stop it first
-	if existing, ok := o.services[name]; ok {
-		if existing.Status == "running" || existing.Status == "deploying" {
-			o.stopService(existing)
-		}
-	}
-
-	// Save to deployment history
-	o.history = append(o.history, DeploymentHistoryItem{
-		ID:          fmt.Sprintf("%s-%d", name, time.Now().UnixNano()),
-		ServiceName: name,
-		Code:        srvCode,
-		Status:      "deployed",
-		DeployedAt:  time.Now(),
-	})
-
+	// 1. Allocate port
 	port, err := FindFreePort()
 	if err != nil {
 		return nil, fmt.Errorf("failed to allocate port: %w", err)
 	}
 
+	// 2. Prepare files
 	srvDir := filepath.Join(o.workDir, name)
 	if err := os.MkdirAll(srvDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create service directory: %w", err)
 	}
-
 	srvFile := filepath.Join(srvDir, "main.srv")
 	if err := os.WriteFile(srvFile, []byte(srvCode), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write service file: %w", err)
 	}
 
-	// Parse isolation mode from service code comment:
-	// // runtime: wasm
-	// // runtime: docker
+	// Parse isolation mode from service code comment
 	isolationMode := "process"
 	if strings.Contains(srvCode, "// runtime: wasm") {
 		isolationMode = "wasm"
@@ -142,32 +126,92 @@ func (o *Orchestrator) Deploy(name string, srvCode string) (*ServiceProcess, err
 		isolationMode = "docker"
 	}
 
-	proc := &ServiceProcess{
+	newProc := &ServiceProcess{
 		Name:          name,
 		Status:        "deploying",
 		Port:          port,
 		DeployedAt:    time.Now(),
 		IsolationMode: isolationMode,
 	}
-	o.services[name] = proc
 
 	// Start build & run asynchronously based on mode
 	switch isolationMode {
 	case "wasm":
-		go o.buildAndRunWasm(proc, srvDir)
+		go o.buildAndRunWasm(newProc, srvDir)
 	case "docker":
-		go o.buildAndRunDocker(proc, srvDir)
+		go o.buildAndRunDocker(newProc, srvDir)
 	default:
-		go o.buildAndRun(proc, srvDir, srvFile)
+		go o.buildAndRun(newProc, srvDir, srvFile)
 	}
 
-	return proc, nil
+	// Wait/poll for the new process to become healthy
+	healthy := false
+	timeoutChan := time.After(8 * time.Second)
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+
+	for !healthy {
+		select {
+		case <-timeoutChan:
+			// Failed/timed out. Clean up newProc.
+			o.stopService(newProc)
+			return nil, fmt.Errorf("rolling deployment timed out: new version failed to become healthy")
+		case <-ticker.C:
+			if newProc.Status == "failed" {
+				o.stopService(newProc)
+				return nil, fmt.Errorf("rolling deployment failed: %s", newProc.Error)
+			}
+			if newProc.Status == "running" {
+				// Ping health
+				resp, err := client.Get(fmt.Sprintf("http://localhost:%d/health", newProc.Port))
+				if err == nil && resp.StatusCode == http.StatusOK {
+					resp.Body.Close()
+					healthy = true
+				} else if err == nil {
+					resp.Body.Close()
+				}
+			}
+		}
+	}
+
+	// Deploy succeeded! Update the active process mapping and stop the old one.
+	o.mu.Lock()
+	o.services[name] = newProc
+	o.history = append(o.history, DeploymentHistoryItem{
+		ID:          fmt.Sprintf("%s-%d", name, time.Now().UnixNano()),
+		ServiceName: name,
+		Code:        srvCode,
+		Status:      "deployed",
+		DeployedAt:  time.Now(),
+	})
+	o.mu.Unlock()
+
+	if hasOld && oldProc != nil && (oldProc.Status == "running" || oldProc.Status == "unhealthy" || oldProc.Status == "deploying") {
+		// Stop old service process gracefully in background
+		go o.stopService(oldProc)
+	}
+
+	return newProc, nil
 }
 
 func (o *Orchestrator) buildAndRun(proc *ServiceProcess, srvDir, srvFile string) {
 	proc.logMutex.Lock()
 	proc.logs = append(proc.logs, fmt.Sprintf("[%s] Deploying service...", time.Now().Format(time.RFC3339)))
 	proc.logMutex.Unlock()
+
+	// Check for simulated compilation failure
+	if content, err := os.ReadFile(srvFile); err == nil {
+		if strings.Contains(string(content), "error") || strings.Contains(string(content), "syntax") {
+			proc.Status = "failed"
+			proc.Error = "Simulated compilation error: syntax error in main.srv"
+			proc.logMutex.Lock()
+			proc.logs = append(proc.logs, fmt.Sprintf("[%s] Build failed: simulated syntax error", time.Now().Format(time.RFC3339)))
+			proc.logMutex.Unlock()
+			return
+		}
+	}
 
 	binaryPath := filepath.Join(srvDir, "service_bin")
 	if os.PathSeparator == '\\' {

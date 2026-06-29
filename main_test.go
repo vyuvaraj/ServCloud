@@ -401,3 +401,55 @@ func TestOrchestratorIsolationModes(t *testing.T) {
 		}
 	}
 }
+
+func TestRollingDeployments(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "servcloud-test-rolling-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	orch, err := orchestrator.NewOrchestrator(tempDir)
+	if err != nil {
+		t.Fatalf("failed to create orchestrator: %v", err)
+	}
+
+	// 1. Deploy Version 1 of the service (healthy)
+	v1Code := `print("V1 Healthy");`
+	procV1, err := orch.Deploy("rolling-service", v1Code)
+	if err != nil {
+		t.Fatalf("V1 deployment failed: %v", err)
+	}
+	defer orch.Undeploy("rolling-service")
+
+	v1Port := procV1.Port
+	if procV1.Status != "running" {
+		t.Errorf("expected v1 to be running, got %s", procV1.Status)
+	}
+
+	// 2. Deploy Version 2 (failing build / health checks)
+	// We make it fail by triggering a compilation error or returning failure on healthcheck.
+	// Since we mock Go compiling, let's write a code with a compilation syntax error so go build fails!
+	v2BrokenCode := `package main
+	broken syntax error here`
+	_, err = orch.Deploy("rolling-service", v2BrokenCode)
+
+	// Since it's a rolling deployment, Deploy should return an error, and NOT touch the old running v1!
+	if err == nil {
+		t.Fatalf("expected V2 deployment to fail, but it succeeded")
+	}
+
+	// Check that the active service mapping still points to the old healthy process on v1Port!
+	activeProc, ok := orch.GetService("rolling-service")
+	if !ok {
+		t.Fatalf("rolling-service was deleted completely during failed deployment")
+	}
+
+	if activeProc.Port != v1Port {
+		t.Errorf("expected active process port to remain V1 port %d, but got %d", v1Port, activeProc.Port)
+	}
+
+	if activeProc.Status != "running" {
+		t.Errorf("expected active process status to remain running, but got %q", activeProc.Status)
+	}
+}
