@@ -36,6 +36,8 @@ This roadmap outlines the planned development phases for the ServCloud managed d
 - [x] **Rolling Deployments**: Zero-downtime deploys with health-check gates. Automatic rollback on failure. [June 29, 2026]
 - [ ] **Resource Quotas & Limits**: Per-deployment CPU/memory caps with OOM protection.
 - [x] **Environment Variables Management**: Encrypted env var store per deployment. Secret injection at runtime. [June 29, 2026]
+- [ ] **Secret Injection from ServStore**: Resolve `${{secrets.KEY}}` references from encrypted ServStore bucket at deploy time. Rotate secrets without redeployment.
+- [ ] **ServAuth Integration**: Auto-provision ServAuth OIDC configuration for deployed services. Services get identity management out of the box.
 - [ ] **Build Packs**: Auto-detect project type (Go, Node, Python, Serv) and build without user-provided Dockerfile.
 - [ ] **Deployment Previews**: Branch-based preview deployments with unique URLs (like Vercel previews).
 - [ ] **Horizontal Auto-scaling**: Scale instances up/down based on request rate from ServGate metrics.
