@@ -453,3 +453,46 @@ func TestRollingDeployments(t *testing.T) {
 		t.Errorf("expected active process status to remain running, but got %q", activeProc.Status)
 	}
 }
+
+func TestEnvVariablesManagement(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "servcloud-test-env-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	orch, err := orchestrator.NewOrchestrator(tempDir)
+	if err != nil {
+		t.Fatalf("failed to create orchestrator: %v", err)
+	}
+
+	// 1. Deploy service with a default environment variable in comments
+	code := `// env: DEFAULT_VAL=my-default-value
+	print("Hello Env");`
+	proc, err := orch.Deploy("env-service", code)
+	if err != nil {
+		t.Fatalf("deployment failed: %v", err)
+	}
+	defer orch.Undeploy("env-service")
+
+	if val, ok := proc.Env["DEFAULT_VAL"]; !ok || val != "my-default-value" {
+		t.Errorf("expected DEFAULT_VAL env to be 'my-default-value', got %q (ok=%t)", val, ok)
+	}
+
+	// 2. Deploy again overriding with dynamic custom env variables
+	customEnv := map[string]string{
+		"DEFAULT_VAL": "overridden-value",
+		"DYNAMIC_VAL": "dynamic-value",
+	}
+	proc2, err := orch.DeployWithEnv("env-service", code, customEnv)
+	if err != nil {
+		t.Fatalf("deployment with custom env failed: %v", err)
+	}
+
+	if val, ok := proc2.Env["DEFAULT_VAL"]; !ok || val != "overridden-value" {
+		t.Errorf("expected DEFAULT_VAL env to be 'overridden-value', got %q", val)
+	}
+	if val, ok := proc2.Env["DYNAMIC_VAL"]; !ok || val != "dynamic-value" {
+		t.Errorf("expected DYNAMIC_VAL env to be 'dynamic-value', got %q", val)
+	}
+}

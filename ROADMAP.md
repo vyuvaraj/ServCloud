@@ -35,7 +35,7 @@ This roadmap outlines the planned development phases for the ServCloud managed d
 ## Phase 3: Production-Ready PaaS (Next Level)
 - [x] **Rolling Deployments**: Zero-downtime deploys with health-check gates. Automatic rollback on failure. [June 29, 2026]
 - [ ] **Resource Quotas & Limits**: Per-deployment CPU/memory caps with OOM protection.
-- [ ] **Environment Variables Management**: Encrypted env var store per deployment. Secret injection at runtime.
+- [x] **Environment Variables Management**: Encrypted env var store per deployment. Secret injection at runtime. [June 29, 2026]
 - [ ] **Build Packs**: Auto-detect project type (Go, Node, Python, Serv) and build without user-provided Dockerfile.
 - [ ] **Deployment Previews**: Branch-based preview deployments with unique URLs (like Vercel previews).
 - [ ] **Horizontal Auto-scaling**: Scale instances up/down based on request rate from ServGate metrics.

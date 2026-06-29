@@ -74,6 +74,12 @@ func (s *Server) Handler() http.Handler {
 				return
 			}
 		}
+		if len(parts) == 4 && parts[3] == "env" {
+			if r.Method == http.MethodPost {
+				s.handleUpdateEnv(w, r, name)
+				return
+			}
+		}
 		
 		if len(parts) == 3 {
 			if r.Method == http.MethodDelete {
@@ -252,4 +258,64 @@ func (s *Server) handleRollback(w http.ResponseWriter, r *http.Request, name str
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(proc)
+}
+
+func (s *Server) handleUpdateEnv(w http.ResponseWriter, r *http.Request, name string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var newEnv map[string]string
+	if err := json.NewDecoder(r.Body).Decode(&newEnv); err != nil {
+		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Fetch current service process to get its srvCode code
+	proc, ok := s.orch.GetService(name)
+	if !ok {
+		http.Error(w, "Service not found", http.StatusNotFound)
+		return
+	}
+
+	// Fetch deployment history to retrieve the code snapshot
+	history := s.orch.GetHistory()
+	var code string
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].ServiceName == name {
+			code = history[i].Code
+			break
+		}
+	}
+
+	if code == "" {
+		http.Error(w, "No code snapshot found to deploy", http.StatusInternalServerError)
+		return
+	}
+
+	// Trigger rolling deployment with the new dynamic env overrides!
+	// We merge existing env with the new env variables
+	mergedEnv := make(map[string]string)
+	for k, v := range proc.Env {
+		mergedEnv[k] = v
+	}
+	for k, v := range newEnv {
+		mergedEnv[k] = v
+	}
+
+	newProc, err := s.orch.DeployWithEnv(name, code, mergedEnv)
+	if err != nil {
+		http.Error(w, "Rolling update with new environment variables failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Register with Gateway if configured
+	if s.gatewayURL != "" {
+		go s.registerWithGateway(name, newProc.Port)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(newProc)
 }

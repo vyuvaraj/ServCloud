@@ -17,12 +17,13 @@ import (
 )
 
 type ServiceProcess struct {
-	Name          string    `json:"name"`
-	Status        string    `json:"status"` // deploying, running, failed, stopped, unhealthy
-	Port          int       `json:"port"`
-	Error         string    `json:"error,omitempty"`
-	DeployedAt    time.Time `json:"deployed_at"`
-	IsolationMode string    `json:"isolation_mode"` // "process", "wasm", "docker"
+	Name          string            `json:"name"`
+	Status        string            `json:"status"` // deploying, running, failed, stopped, unhealthy
+	Port          int               `json:"port"`
+	Error         string            `json:"error,omitempty"`
+	DeployedAt    time.Time         `json:"deployed_at"`
+	IsolationMode string            `json:"isolation_mode"` // "process", "wasm", "docker"
+	Env           map[string]string `json:"env,omitempty"`
 	
 	cmd       *exec.Cmd
 	logs      []string
@@ -98,6 +99,10 @@ func FindFreePort() (int, error) {
 }
 
 func (o *Orchestrator) Deploy(name string, srvCode string) (*ServiceProcess, error) {
+	return o.DeployWithEnv(name, srvCode, nil)
+}
+
+func (o *Orchestrator) DeployWithEnv(name string, srvCode string, customEnv map[string]string) (*ServiceProcess, error) {
 	o.mu.Lock()
 	oldProc, hasOld := o.services[name]
 	o.mu.Unlock()
@@ -126,12 +131,35 @@ func (o *Orchestrator) Deploy(name string, srvCode string) (*ServiceProcess, err
 		isolationMode = "docker"
 	}
 
+	// Parse env variables from code comments: // env: KEY=VALUE
+	envMap := make(map[string]string)
+	lines := strings.Split(srvCode, "\n")
+	for _, l := range lines {
+		trimmed := strings.TrimSpace(l)
+		if strings.HasPrefix(trimmed, "// env:") {
+			parts := strings.SplitN(strings.TrimPrefix(trimmed, "// env:"), "=", 2)
+			if len(parts) == 2 {
+				k := strings.TrimSpace(parts[0])
+				v := strings.TrimSpace(parts[1])
+				if k != "" {
+					envMap[k] = v
+				}
+			}
+		}
+	}
+
+	// Override with custom dynamic environment variables
+	for k, v := range customEnv {
+		envMap[k] = v
+	}
+
 	newProc := &ServiceProcess{
 		Name:          name,
 		Status:        "deploying",
 		Port:          port,
 		DeployedAt:    time.Now(),
 		IsolationMode: isolationMode,
+		Env:           envMap,
 	}
 
 	// Start build & run asynchronously based on mode
@@ -312,6 +340,9 @@ func main() {
 	cmd := exec.Command(binaryPath)
 	cmd.Dir = srvDir
 	cmd.Env = append(os.Environ(), fmt.Sprintf("PORT=%d", proc.Port))
+	for k, v := range proc.Env {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
+	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
