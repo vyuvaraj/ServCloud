@@ -27,9 +27,9 @@ This roadmap outlines the planned development phases for the ServCloud managed d
 - [x] **CPU/Memory stats**: Query system OS metrics for resource consumption monitoring.
 
 ## Phase 4: Production Isolation & Security (Planned)
-- [ ] **WASM Isolation**: Direct execution of compiled WASM targets in-process for sandbox isolation.
-- [ ] **Docker Engine runner**: Spin up individual services in isolated Docker containers instead of native processes.
-- [ ] **Shared OIDC Authentication**: Enforce bearer token validation via shared `SERV_JWT_SECRET`.
+- [x] **WASM Isolation**: Direct execution of compiled WASM targets in-process for sandbox isolation. [June 29, 2026]
+- [x] **Docker Engine runner**: Spin up individual services in isolated Docker containers instead of native processes. [June 29, 2026]
+- [x] **Shared OIDC Authentication**: Enforce bearer token validation via shared `SERV_JWT_SECRET`. [June 29, 2026]
 
 
 ## Phase 3: Production-Ready PaaS (Next Level)

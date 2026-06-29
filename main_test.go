@@ -328,3 +328,68 @@ func TestServCloudPhase3Features(t *testing.T) {
 		}
 	}
 }
+
+func TestOrchestratorIsolationModes(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "servcloud-test-modes-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	orch, err := orchestrator.NewOrchestrator(tempDir)
+	if err != nil {
+		t.Fatalf("failed to create orchestrator: %v", err)
+	}
+
+	// 1. Test WASM isolation deployment
+	wasmCode := `// runtime: wasm
+	print("Hello WASM");`
+	procWasm, err := orch.Deploy("wasm-service", wasmCode)
+	if err != nil {
+		t.Fatalf("WASM deployment failed: %v", err)
+	}
+	defer orch.Undeploy("wasm-service")
+
+	if procWasm.IsolationMode != "wasm" {
+		t.Errorf("Expected isolation mode wasm, got %q", procWasm.IsolationMode)
+	}
+
+	// 2. Test Docker isolation deployment
+	dockerCode := `// runtime: docker
+	print("Hello Docker");`
+	procDocker, err := orch.Deploy("docker-service", dockerCode)
+	if err != nil {
+		t.Fatalf("Docker deployment failed: %v", err)
+	}
+	defer orch.Undeploy("docker-service")
+
+	if procDocker.IsolationMode != "docker" {
+		t.Errorf("Expected isolation mode docker, got %q", procDocker.IsolationMode)
+	}
+
+	// Wait and poll for status to become running
+	timeoutRun := time.After(15 * time.Second)
+	tickerRun := time.NewTicker(200 * time.Millisecond)
+	defer tickerRun.Stop()
+
+	wasmRunning := false
+	dockerRunning := false
+
+	for !wasmRunning || !dockerRunning {
+		select {
+		case <-timeoutRun:
+			pWasm, _ := orch.GetService("wasm-service")
+			pDocker, _ := orch.GetService("docker-service")
+			t.Fatalf("Timeout waiting for services to start. WASM mode: %s, Docker mode: %s", pWasm.Status, pDocker.Status)
+		case <-tickerRun.C:
+			pWasm, _ := orch.GetService("wasm-service")
+			if pWasm.Status == "running" {
+				wasmRunning = true
+			}
+			pDocker, _ := orch.GetService("docker-service")
+			if pDocker.Status == "running" {
+				dockerRunning = true
+			}
+		}
+	}
+}
