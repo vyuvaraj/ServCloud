@@ -148,7 +148,7 @@ func (s *Server) handleListServices(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(services)
 }
 
-func (s *Server) handleGetService(w http.ResponseWriter, r *http.Request, name string) {
+func (s *Server) handleGetService(w http.ResponseWriter, _ *http.Request, name string) {
 	proc, ok := s.orch.GetService(name)
 	if !ok {
 		http.Error(w, "Service not found", http.StatusNotFound)
@@ -159,7 +159,7 @@ func (s *Server) handleGetService(w http.ResponseWriter, r *http.Request, name s
 	json.NewEncoder(w).Encode(proc)
 }
 
-func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request, name string) {
+func (s *Server) handleGetLogs(w http.ResponseWriter, _ *http.Request, name string) {
 	proc, ok := s.orch.GetService(name)
 	if !ok {
 		http.Error(w, "Service not found", http.StatusNotFound)
@@ -171,7 +171,7 @@ func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request, name stri
 	json.NewEncoder(w).Encode(logs)
 }
 
-func (s *Server) handleUndeploy(w http.ResponseWriter, r *http.Request, name string) {
+func (s *Server) handleUndeploy(w http.ResponseWriter, _ *http.Request, name string) {
 	if err := s.orch.Undeploy(name); err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
@@ -229,7 +229,7 @@ func (s *Server) handleGetHistory(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(history)
 }
 
-func (s *Server) handleGetStats(w http.ResponseWriter, r *http.Request, name string) {
+func (s *Server) handleGetStats(w http.ResponseWriter, _ *http.Request, name string) {
 	proc, ok := s.orch.GetService(name)
 	if !ok {
 		http.Error(w, "Service not found", http.StatusNotFound)
