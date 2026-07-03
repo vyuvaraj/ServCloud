@@ -39,6 +39,7 @@ func (s *Server) Handler() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"ok"}`))
 	})
+	mux.HandleFunc("/api/version", ServShared.VersionHandler("servcloud", "1.0.0"))
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/api/deploy", s.handleDeploy)
 	mux.HandleFunc("/api/services", s.handleListServices)
