@@ -305,27 +305,44 @@ func MaxBytesMiddleware(limit int64) func(http.Handler) http.Handler {
 	}
 }
 
-var sanitizeRegex = regexp.MustCompile(`(?i)(password|secret|token|key|authorization|bearer|passwd)\s*[:=]\s*([^\s,"']+)`)
+var sanitizeRegex = regexp.MustCompile(`(?i)(["']?)(password|secret|token|key|authorization|bearer|passwd)(["']?)\s*[:=]\s*("([^"]+)"|'([^']+)'|([^\s,"'\r\n]+))`)
 
 // SanitizeLog redacts sensitive information from log messages.
 func SanitizeLog(msg string) string {
-	return sanitizeRegex.ReplaceAllString(msg, "$1:[REDACTED]")
+	return sanitizeRegex.ReplaceAllStringFunc(msg, func(match string) string {
+		sepIdx := strings.IndexAny(match, ":=")
+		if sepIdx == -1 {
+			return match
+		}
+		keyPart := match[:sepIdx+1]
+		valPart := match[sepIdx+1:]
+		trimmedVal := strings.TrimSpace(valPart)
+		
+		spaceLen := len(valPart) - len(strings.TrimLeft(valPart, " \t"))
+		leadingSpaces := valPart[:spaceLen]
+
+		if strings.HasPrefix(trimmedVal, "\"") && strings.HasSuffix(trimmedVal, "\"") {
+			return keyPart + leadingSpaces + `"[REDACTED]"`
+		}
+		if strings.HasPrefix(trimmedVal, "'") && strings.HasSuffix(trimmedVal, "'") {
+			return keyPart + leadingSpaces + `'[REDACTED]'`
+		}
+		return keyPart + leadingSpaces + "[REDACTED]"
+	})
 }
 
 // IsolateTopic prefixes a topic name with the tenant ID from context.
+// In OSS: returns the topic unchanged (single-tenant mode).
+// In EE: prefixes with tenant ID for multi-tenant isolation.
 func IsolateTopic(ctx context.Context, topic string) string {
-	if tid, ok := ctx.Value(TenantContextKey).(string); ok && tid != "" && tid != "default" {
-		return tid + "-" + topic
-	}
-	return topic
+	return isolateTopicImpl(ctx, topic)
 }
 
 // IsolateDBPool prefixes database name with the tenant ID from context.
+// In OSS: returns the dbName unchanged (single-tenant mode).
+// In EE: prefixes with tenant ID for multi-tenant isolation.
 func IsolateDBPool(ctx context.Context, dbName string) string {
-	if tid, ok := ctx.Value(TenantContextKey).(string); ok && tid != "" && tid != "default" {
-		return tid + "_" + dbName
-	}
-	return dbName
+	return isolateDBPoolImpl(ctx, dbName)
 }
 
 // VersionHandler returns a JSON version response.
@@ -336,6 +353,7 @@ func VersionHandler(serviceName, version string) http.HandlerFunc {
 		json.NewEncoder(w).Encode(map[string]string{
 			"service": serviceName,
 			"version": version,
+			"edition": Edition,
 		})
 	}
 }
