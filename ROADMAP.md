@@ -49,3 +49,14 @@ This roadmap outlines the planned development phases for the ServCloud managed d
 - [ ] **Local `serv cloud emulate`** — Emulate the full production deploy pipeline locally: health checks, rolling update, rollback — catching breakage before pushing (DX)
 
 > See [UNIFIED_ROADMAP.md](../servverse-repo/UNIFIED_ROADMAP.md) for the full ecosystem priority matrix.
+
+
+---
+
+## Phase 7: Test Coverage (Pending — Phase 22)
+
+> **Issue:** Only 7 test functions in 1 file.
+
+| # | Item | Effort | Description | Status |
+|---|------|--------|-------------|--------|
+| 7.1 | **Expand test suite** | Medium | From 7 → 30+ test functions: deploy lifecycle, port allocation conflicts, health monitoring recovery, gateway route sync, Docker runner isolation, rollback | [ ] |
