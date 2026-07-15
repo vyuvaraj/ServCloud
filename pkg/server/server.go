@@ -45,6 +45,7 @@ func (s *Server) Handler() http.Handler {
 		w.Write([]byte(`{"status":"ok"}`))
 	})
 	mux.HandleFunc("/api/version", ServShared.VersionHandler("servcloud", "1.0.0"))
+	mux.HandleFunc("/api/v1/version", ServShared.VersionHandler("servcloud", "1.0.0"))
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/api/deploy", s.handleDeploy)
 	mux.HandleFunc("/api/services", s.handleListServices)
@@ -55,7 +56,7 @@ func (s *Server) Handler() http.Handler {
 		path := r.URL.Path
 		parts := strings.Split(strings.Trim(path, "/"), "/")
 		if len(parts) < 3 {
-			http.Error(w, "Not Found", http.StatusNotFound)
+			writeJSONError(w, r, "Not Found", http.StatusNotFound)
 			return
 		}
 		
@@ -91,7 +92,7 @@ func (s *Server) Handler() http.Handler {
 			s.handleInvoke(w, r, name)
 			return
 		}
-
+ 
 		if len(parts) == 3 {
 			if r.Method == http.MethodDelete {
 				s.handleUndeploy(w, r, name)
@@ -102,11 +103,30 @@ func (s *Server) Handler() http.Handler {
 				return
 			}
 		}
-
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+ 
+		writeJSONError(w, r, "Method Not Allowed", http.StatusMethodNotAllowed)
 	})
 
-	return ServShared.AuthMiddleware(mux)
+	// Wrapper handler for /api/v1/ prefix rewriting (V1.1 support)
+	v1Wrapper := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/v1/") {
+			r.URL.Path = "/api/" + strings.TrimPrefix(r.URL.Path, "/api/v1/")
+		}
+		mux.ServeHTTP(w, r)
+	})
+
+	// Wrap in ServShared middleware: Trace -> RateLimit -> CORS -> MaxBytes -> Auth -> Tenant -> v1Wrapper
+	return ServShared.TraceMiddleware("servcloud",
+		ServShared.RateLimitMiddleware(
+			ServShared.CORSMiddleware(
+				ServShared.MaxBytesMiddleware(10*1024*1024)(
+					ServShared.AuthMiddleware(
+						ServShared.TenantMiddleware(v1Wrapper),
+					),
+				),
+			),
+		),
+	)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -116,24 +136,24 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, r, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	var req DeployRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		writeJSONError(w, r, "Invalid request body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	if req.Name == "" || req.Code == "" {
-		http.Error(w, "Name and code are required", http.StatusBadRequest)
+		writeJSONError(w, r, "Name and code are required", http.StatusBadRequest)
 		return
 	}
 
 	proc, err := s.orch.Deploy(req.Name, req.Code)
 	if err != nil {
-		http.Error(w, "Deployment failed: "+err.Error(), http.StatusInternalServerError)
+		writeJSONError(w, r, "Deployment failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -149,7 +169,7 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleListServices(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, r, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -158,10 +178,10 @@ func (s *Server) handleListServices(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(services)
 }
 
-func (s *Server) handleGetService(w http.ResponseWriter, _ *http.Request, name string) {
+func (s *Server) handleGetService(w http.ResponseWriter, r *http.Request, name string) {
 	proc, ok := s.orch.GetService(name)
 	if !ok {
-		http.Error(w, "Service not found", http.StatusNotFound)
+		writeJSONError(w, r, "Service not found", http.StatusNotFound)
 		return
 	}
 
@@ -169,10 +189,10 @@ func (s *Server) handleGetService(w http.ResponseWriter, _ *http.Request, name s
 	json.NewEncoder(w).Encode(proc)
 }
 
-func (s *Server) handleGetLogs(w http.ResponseWriter, _ *http.Request, name string) {
+func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request, name string) {
 	proc, ok := s.orch.GetService(name)
 	if !ok {
-		http.Error(w, "Service not found", http.StatusNotFound)
+		writeJSONError(w, r, "Service not found", http.StatusNotFound)
 		return
 	}
 
@@ -181,9 +201,9 @@ func (s *Server) handleGetLogs(w http.ResponseWriter, _ *http.Request, name stri
 	json.NewEncoder(w).Encode(logs)
 }
 
-func (s *Server) handleUndeploy(w http.ResponseWriter, _ *http.Request, name string) {
+func (s *Server) handleUndeploy(w http.ResponseWriter, r *http.Request, name string) {
 	if err := s.orch.Undeploy(name); err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		writeJSONError(w, r, err.Error(), http.StatusNotFound)
 		return
 	}
 
@@ -231,7 +251,7 @@ func (s *Server) deregisterFromGateway(name string) {
 
 func (s *Server) handleGetHistory(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, r, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	history := s.orch.GetHistory()
@@ -239,10 +259,10 @@ func (s *Server) handleGetHistory(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(history)
 }
 
-func (s *Server) handleGetStats(w http.ResponseWriter, _ *http.Request, name string) {
+func (s *Server) handleGetStats(w http.ResponseWriter, r *http.Request, name string) {
 	proc, ok := s.orch.GetService(name)
 	if !ok {
-		http.Error(w, "Service not found", http.StatusNotFound)
+		writeJSONError(w, r, "Service not found", http.StatusNotFound)
 		return
 	}
 	stats := proc.GetStats()
@@ -252,12 +272,12 @@ func (s *Server) handleGetStats(w http.ResponseWriter, _ *http.Request, name str
 
 func (s *Server) handleRollback(w http.ResponseWriter, r *http.Request, name string) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, r, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	proc, err := s.orch.Rollback(name)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeJSONError(w, r, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -273,20 +293,20 @@ func (s *Server) handleRollback(w http.ResponseWriter, r *http.Request, name str
 
 func (s *Server) handleUpdateEnv(w http.ResponseWriter, r *http.Request, name string) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, r, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	var newEnv map[string]string
 	if err := json.NewDecoder(r.Body).Decode(&newEnv); err != nil {
-		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		writeJSONError(w, r, "Invalid request body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	// Fetch current service process to get its srvCode code
 	proc, ok := s.orch.GetService(name)
 	if !ok {
-		http.Error(w, "Service not found", http.StatusNotFound)
+		writeJSONError(w, r, "Service not found", http.StatusNotFound)
 		return
 	}
 
@@ -301,7 +321,7 @@ func (s *Server) handleUpdateEnv(w http.ResponseWriter, r *http.Request, name st
 	}
 
 	if code == "" {
-		http.Error(w, "No code snapshot found to deploy", http.StatusInternalServerError)
+		writeJSONError(w, r, "No code snapshot found to deploy", http.StatusInternalServerError)
 		return
 	}
 
@@ -317,7 +337,7 @@ func (s *Server) handleUpdateEnv(w http.ResponseWriter, r *http.Request, name st
 
 	newProc, err := s.orch.DeployWithEnv(name, code, mergedEnv)
 	if err != nil {
-		http.Error(w, "Rolling update with new environment variables failed: "+err.Error(), http.StatusInternalServerError)
+		writeJSONError(w, r, "Rolling update with new environment variables failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -334,7 +354,7 @@ func (s *Server) handleUpdateEnv(w http.ResponseWriter, r *http.Request, name st
 func (s *Server) handleInvoke(w http.ResponseWriter, r *http.Request, name string) {
 	proc, ok := s.orch.GetService(name)
 	if !ok {
-		http.Error(w, "Service not found", http.StatusNotFound)
+		writeJSONError(w, r, "Service not found", http.StatusNotFound)
 		return
 	}
 
@@ -348,13 +368,13 @@ func (s *Server) handleInvoke(w http.ResponseWriter, r *http.Request, name strin
 			}
 		}
 		if code == "" {
-			http.Error(w, "No code snapshot found to deploy", http.StatusInternalServerError)
+			writeJSONError(w, r, "No code snapshot found to deploy", http.StatusInternalServerError)
 			return
 		}
 
 		newProc, err := s.orch.DeployWithEnv(name, code, proc.Env)
 		if err != nil {
-			http.Error(w, "Scale up failed: "+err.Error(), http.StatusInternalServerError)
+			writeJSONError(w, r, "Scale up failed: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 		proc = newProc
@@ -365,5 +385,28 @@ func (s *Server) handleInvoke(w http.ResponseWriter, r *http.Request, name strin
 	targetURL, _ := url.Parse(fmt.Sprintf("http://localhost:%d", proc.Port))
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
 	proxy.ServeHTTP(w, r)
+}
+
+func writeJSONError(w http.ResponseWriter, r *http.Request, msg string, status int) {
+	var errorCode string
+	switch status {
+	case http.StatusMethodNotAllowed:
+		errorCode = "ERR_METHOD_NOT_ALLOWED"
+	case http.StatusBadRequest:
+		errorCode = "ERR_BAD_REQUEST"
+	case http.StatusUnauthorized:
+		errorCode = "ERR_UNAUTHORIZED"
+	case http.StatusForbidden:
+		errorCode = "ERR_FORBIDDEN"
+	case http.StatusNotFound:
+		errorCode = "ERR_NOT_FOUND"
+	case http.StatusConflict:
+		errorCode = "ERR_CONFLICT"
+	case http.StatusNotImplemented:
+		errorCode = "ERR_NOT_IMPLEMENTED"
+	default:
+		errorCode = "ERR_INTERNAL_SERVER_ERROR"
+	}
+	ServShared.WriteJSONError(w, r, msg, errorCode, status)
 }
 
