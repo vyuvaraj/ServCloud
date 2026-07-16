@@ -663,3 +663,56 @@ func TestScaleToZeroAndInvoke(t *testing.T) {
 	}
 }
 
+func TestPreviewDeployments(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "servcloud-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	orch, err := orchestrator.NewOrchestrator(tempDir)
+	if err != nil {
+		t.Fatalf("failed to create orchestrator: %v", err)
+	}
+	srv := server.NewServer(orch, "", "")
+	defer srv.StopAutoscaleLoopForTest()
+
+	testServer := httptest.NewServer(srv.Handler())
+	defer testServer.Close()
+
+	payload := map[string]string{
+		"name":   "preview-app",
+		"code":   "// simple service\nroute \"GET\" \"/\" {\n  return \"hello\"\n}",
+		"branch": "feat-cool-feature",
+	}
+	bodyBytes, _ := json.Marshal(payload)
+
+	resp, err := http.Post(testServer.URL+"/api/deploy", "application/json", bytes.NewReader(bodyBytes))
+	if err != nil {
+		t.Fatalf("failed to post deployment: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected status 202 Accepted, got %d", resp.StatusCode)
+	}
+
+	var proc orchestrator.ServiceProcess
+	if err := json.NewDecoder(resp.Body).Decode(&proc); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if proc.Name != "preview-app-feat-cool-feature" {
+		t.Errorf("expected process name 'preview-app-feat-cool-feature', got %q", proc.Name)
+	}
+
+	if proc.Branch != "feat-cool-feature" {
+		t.Errorf("expected branch 'feat-cool-feature', got %q", proc.Branch)
+	}
+
+	expectedPrefix := "http://localhost:"
+	if !strings.HasPrefix(proc.PreviewURL, expectedPrefix) || !strings.Contains(proc.PreviewURL, "/preview/feat-cool-feature/preview-app") {
+		t.Errorf("unexpected preview URL: %q", proc.PreviewURL)
+	}
+}
+

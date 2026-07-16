@@ -33,8 +33,9 @@ func NewServer(orch *orchestrator.Orchestrator, gatewayURL, authToken string) *S
 }
 
 type DeployRequest struct {
-	Name string `json:"name"`
-	Code string `json:"code"`
+	Name   string `json:"name"`
+	Code   string `json:"code"`
+	Branch string `json:"branch,omitempty"`
 }
 
 func (s *Server) Handler() http.Handler {
@@ -151,7 +152,19 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	proc, err := s.orch.Deploy(req.Name, req.Code)
+	branch := req.Branch
+	if branch == "" {
+		branch = r.Header.Get("X-Branch-Name")
+	}
+
+	var proc *orchestrator.ServiceProcess
+	var err error
+	if branch != "" {
+		proc, err = s.orch.DeployPreview(req.Name, req.Code, branch, nil)
+	} else {
+		proc, err = s.orch.Deploy(req.Name, req.Code)
+	}
+
 	if err != nil {
 		writeJSONError(w, r, "Deployment failed: "+err.Error(), http.StatusInternalServerError)
 		return

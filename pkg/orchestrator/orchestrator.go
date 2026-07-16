@@ -24,6 +24,8 @@ type ServiceProcess struct {
 	DeployedAt    time.Time         `json:"deployed_at"`
 	IsolationMode string            `json:"isolation_mode"` // "process", "wasm", "docker"
 	Env           map[string]string `json:"env,omitempty"`
+	Branch        string            `json:"branch,omitempty"`
+	PreviewURL    string            `json:"preview_url,omitempty"`
 	
 	cmd       *exec.Cmd
 	logs      []string
@@ -100,6 +102,20 @@ func FindFreePort() (int, error) {
 
 func (o *Orchestrator) Deploy(name string, srvCode string) (*ServiceProcess, error) {
 	return o.DeployWithEnv(name, srvCode, nil)
+}
+
+func (o *Orchestrator) DeployPreview(name string, srvCode string, branch string, customEnv map[string]string) (*ServiceProcess, error) {
+	previewName := name
+	if branch != "" {
+		previewName = fmt.Sprintf("%s-%s", name, branch)
+	}
+	proc, err := o.DeployWithEnv(previewName, srvCode, customEnv)
+	if err != nil {
+		return nil, err
+	}
+	proc.Branch = branch
+	proc.PreviewURL = fmt.Sprintf("http://localhost:%d/preview/%s/%s", proc.Port, branch, name)
+	return proc, nil
 }
 
 func (o *Orchestrator) DeployWithEnv(name string, srvCode string, customEnv map[string]string) (*ServiceProcess, error) {
